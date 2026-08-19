@@ -26,7 +26,7 @@ export const RecordingOverlay: React.FC<Props> = ({ onStopRecord }) => {
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: -10, scale: 0.95 }}
         transition={{ duration: 0.2 }}
-        className="fixed top-4 right-4 z-50 pointer-events-auto bg-gray-950/90 text-white rounded-lg p-3 shadow-2xl border border-red-500/40 backdrop-blur-md min-w-[200px]"
+        className="fixed top-16 right-4 z-50 pointer-events-auto bg-gray-950/90 text-white rounded-lg p-3 shadow-2xl border border-red-500/40 backdrop-blur-md min-w-[200px]"
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-3">

@@ -45,7 +45,7 @@ export const EditorToolbar: React.FC<Props> = ({
     <motion.div
       initial={{ y: -50, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-white/95 backdrop-blur-md px-3.5 py-2 rounded-xl shadow-xl border border-gray-200/90 text-gray-800 pointer-events-auto select-none"
+      className="absolute top-4 right-4 z-30 flex items-center gap-2 bg-white/95 backdrop-blur-md px-3.5 py-2 rounded-xl shadow-xl border border-gray-200/90 text-gray-800 pointer-events-auto select-none"
     >
       {/* Mouse Controls Guidance Badge */}
       <div
