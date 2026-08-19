@@ -22,6 +22,17 @@ export function areCellsAdjacent(a: GridCell, b: GridCell): boolean {
 }
 
 /**
+ * Checks if a path chain forms a closed loop on the 4-connected grid.
+ * (A cycle on a 4-connected grid has length >= 4 with head adjacent to tail)
+ */
+export function isPathClosed(chain: PathChain): boolean {
+  if (chain.length < 4) return false;
+  const head = chain[0];
+  const tail = chain[chain.length - 1];
+  return areCellsAdjacent(head, tail);
+}
+
+/**
  * Converts screen/canvas mouse coordinates into grid cell coordinates (col, row).
  * Returns null if the coordinate is outside the grid bounds.
  */
@@ -93,11 +104,12 @@ export function clonePaths(paths: PathChain[]): PathChain[] {
 }
 
 /**
- * Adds a cell into the path chains with intelligent connection & merging:
- * 1. If adjacent to the end of an existing path, append to that path.
- * 2. If adjacent to the start of an existing path, prepend to that path.
- * 3. If connecting the ends of two different paths, merges them into one continuous chain.
- * 4. Otherwise, if starting a new stroke, creates a new isolated single-cell path.
+ * Adds a cell into the path chains with intelligent connection, merging, & loop closing:
+ * 1. If adjacent to the start node of the active chain (length >= 3), closes the loop.
+ * 2. If adjacent to the end of an existing path, append to that path.
+ * 3. If adjacent to the start of an existing path, prepend to that path.
+ * 4. If connecting the ends of two different paths, merges them into one continuous chain.
+ * 5. Otherwise, creates a new isolated path or starts a new chain.
  */
 export function addCellToPaths(
   existingPaths: PathChain[],
@@ -132,21 +144,29 @@ export function addCellToPaths(
     }
   }
 
-  // Case 1: If target cell is already in the active chain at the very end, nothing to do
-  if (
-    currentActiveIdx !== null &&
-    existingChainIdx === currentActiveIdx &&
-    existingNodeIdx === paths[currentActiveIdx].length - 1
-  ) {
-    return { nextPaths: paths, updatedChainIndex: currentActiveIdx };
-  }
-
-  // Case 2: Continuing active drawing chain
+  // Case 1: Continuing active drawing chain
   if (currentActiveIdx !== null && paths[currentActiveIdx]) {
     const chain = paths[currentActiveIdx];
     const lastCell = chain[chain.length - 1];
 
     if (areCellsAdjacent(lastCell, targetCell)) {
+      // Loop closure: if dragging back to the head of the current chain, close the loop!
+      if (
+        chain.length >= 3 &&
+        existingChainIdx === currentActiveIdx &&
+        existingNodeIdx === 0
+      ) {
+        return { nextPaths: paths, updatedChainIndex: currentActiveIdx };
+      }
+
+      // If target cell is already in the active chain at the very end, nothing to do
+      if (
+        existingChainIdx === currentActiveIdx &&
+        existingNodeIdx === chain.length - 1
+      ) {
+        return { nextPaths: paths, updatedChainIndex: currentActiveIdx };
+      }
+
       // If target cell is part of another chain at end or start, merge them!
       if (
         existingChainIdx !== -1 &&
@@ -178,7 +198,6 @@ export function addCellToPaths(
 
       // If cell already existed in the middle of a path, remove that old reference
       if (existingChainIdx !== -1) {
-        // Cut out from previous position to avoid duplicate references
         paths[existingChainIdx].splice(existingNodeIdx, 1);
         if (paths[existingChainIdx].length === 0) {
           paths.splice(existingChainIdx, 1);
@@ -193,8 +212,7 @@ export function addCellToPaths(
     }
   }
 
-  // Case 3: Starting a new stroke or connecting to an existing end/start node
-  // Check if targetCell is adjacent to any existing chain's end or start
+  // Case 2: Starting a new stroke or connecting to an existing end/start node
   for (let c = 0; c < paths.length; c++) {
     const chain = paths[c];
     if (chain.length === 0) continue;
@@ -202,21 +220,31 @@ export function addCellToPaths(
     const tail = chain[chain.length - 1];
     const head = chain[0];
 
+    // If chain is already closed, don't accidentally extend it unless modifying
+    if (isPathClosed(chain)) continue;
+
     if (areCellsAdjacent(tail, targetCell)) {
+      if (chain.length >= 3 && areCellsEqual(head, targetCell)) {
+        // Closed loop formed!
+        return { nextPaths: paths, updatedChainIndex: c };
+      }
       // Append to tail
       chain.push({ ...targetCell });
       return { nextPaths: paths, updatedChainIndex: c };
     }
 
     if (areCellsAdjacent(head, targetCell)) {
+      if (chain.length >= 3 && areCellsEqual(tail, targetCell)) {
+        // Closed loop formed!
+        return { nextPaths: paths, updatedChainIndex: c };
+      }
       // Prepend to head
       chain.unshift({ ...targetCell });
       return { nextPaths: paths, updatedChainIndex: c };
     }
   }
 
-  // Case 4: Target cell does not connect to any existing chain
-  // If it's already an existing cell, switch activeChainIndex to it
+  // Case 3: Target cell does not connect to any existing chain
   if (existingChainIdx !== -1) {
     return { nextPaths: paths, updatedChainIndex: existingChainIdx };
   }
@@ -228,7 +256,8 @@ export function addCellToPaths(
 
 /**
  * Erases a cell from the path chains.
- * If the cell is in the middle of a path, splits the path into two sub-paths.
+ * If the cell is in a closed loop, unrolls the loop into an open path.
+ * If the cell is in the middle of an open path, splits the path into two sub-paths.
  */
 export function eraseCellFromPaths(
   existingPaths: PathChain[],
@@ -245,15 +274,28 @@ export function eraseCellFromPaths(
       // Not in this chain, keep it
       result.push(chain.map((c) => ({ ...c })));
     } else {
-      // Split chain into before and after
-      const before = chain.slice(0, cellIndex);
-      const after = chain.slice(cellIndex + 1);
+      if (isPathClosed(chain)) {
+        // Unroll closed loop into an open chain
+        const N = chain.length;
+        const unrolled: GridCell[] = [];
+        for (let i = 1; i < N; i++) {
+          const idx = (cellIndex + i) % N;
+          unrolled.push({ ...chain[idx] });
+        }
+        if (unrolled.length > 0) {
+          result.push(unrolled);
+        }
+      } else {
+        // Split open chain into before and after
+        const before = chain.slice(0, cellIndex);
+        const after = chain.slice(cellIndex + 1);
 
-      if (before.length > 0) {
-        result.push(before.map((c) => ({ ...c })));
-      }
-      if (after.length > 0) {
-        result.push(after.map((c) => ({ ...c })));
+        if (before.length > 0) {
+          result.push(before.map((c) => ({ ...c })));
+        }
+        if (after.length > 0) {
+          result.push(after.map((c) => ({ ...c })));
+        }
       }
     }
   }

@@ -1,5 +1,6 @@
 import type p5 from "p5";
 import type { PathChain, SketchParameters } from "../../types/sketch";
+import { isPathClosed } from "../pathEditor";
 import { getLayoutMetrics } from "./layoutHelper";
 
 // Elevation constants (Strictly: Outer Envelope > Core > Grid Lines > Background)
@@ -188,30 +189,108 @@ function renderElementMasks(
     ctx: CanvasRenderingContext2D,
     chain: PathChain,
   ) => {
-    if (chain.length === 0) return;
+    const N = chain.length;
+    if (N === 0) return;
     const roundnessFactor = params.cornerRoundnessPercent / 100.0;
     const maxCornerRadius =
       Math.min(cellWidth, cellHeight) * 0.45 * roundnessFactor;
+    const isClosed = isPathClosed(chain);
 
     ctx.beginPath();
-    const first = chain[0];
-    ctx.moveTo(
-      paddingHorizontal + (first.columnIndex + 0.5) * cellWidth,
-      paddingVertical + (first.rowIndex + 0.5) * cellHeight,
-    );
 
-    if (chain.length === 1 || maxCornerRadius <= 0.001) {
-      for (let i = 1; i < chain.length; i++) {
+    if (N === 1 || maxCornerRadius <= 0.001) {
+      const first = chain[0];
+      ctx.moveTo(
+        paddingHorizontal + (first.columnIndex + 0.5) * cellWidth,
+        paddingVertical + (first.rowIndex + 0.5) * cellHeight,
+      );
+      for (let i = 1; i < N; i++) {
         const node = chain[i];
         ctx.lineTo(
           paddingHorizontal + (node.columnIndex + 0.5) * cellWidth,
           paddingVertical + (node.rowIndex + 0.5) * cellHeight,
         );
       }
+      if (isClosed) {
+        ctx.closePath();
+      }
       return;
     }
 
-    for (let i = 1; i < chain.length - 1; i++) {
+    if (isClosed) {
+      const cuts: {
+        cutInX: number;
+        cutInY: number;
+        cutOutX: number;
+        cutOutY: number;
+        cx: number;
+        cy: number;
+      }[] = [];
+
+      for (let i = 0; i < N; i++) {
+        const prev = chain[(i - 1 + N) % N];
+        const curr = chain[i];
+        const next = chain[(i + 1) % N];
+
+        const pX =
+          paddingHorizontal + (prev.columnIndex + 0.5) * cellWidth;
+        const pY = paddingVertical + (prev.rowIndex + 0.5) * cellHeight;
+        const cX =
+          paddingHorizontal + (curr.columnIndex + 0.5) * cellWidth;
+        const cY = paddingVertical + (curr.rowIndex + 0.5) * cellHeight;
+        const nX =
+          paddingHorizontal + (next.columnIndex + 0.5) * cellWidth;
+        const nY = paddingVertical + (next.rowIndex + 0.5) * cellHeight;
+
+        const vInX = cX - pX;
+        const vInY = cY - pY;
+        const dIn = Math.sqrt(vInX * vInX + vInY * vInY);
+
+        const vOutX = nX - cX;
+        const vOutY = nY - cY;
+        const dOut = Math.sqrt(vOutX * vOutX + vOutY * vOutY);
+
+        const radius = Math.min(maxCornerRadius, dIn * 0.45, dOut * 0.45);
+
+        if (radius <= 0.001) {
+          cuts.push({
+            cutInX: cX,
+            cutInY: cY,
+            cutOutX: cX,
+            cutOutY: cY,
+            cx: cX,
+            cy: cY,
+          });
+        } else {
+          cuts.push({
+            cutInX: cX - (vInX / dIn) * radius,
+            cutInY: cY - (vInY / dIn) * radius,
+            cutOutX: cX + (vOutX / dOut) * radius,
+            cutOutY: cY + (vOutY / dOut) * radius,
+            cx: cX,
+            cy: cY,
+          });
+        }
+      }
+
+      ctx.moveTo(cuts[0].cutInX, cuts[0].cutInY);
+      for (let i = 0; i < N; i++) {
+        const c = cuts[i];
+        const nextC = cuts[(i + 1) % N];
+        ctx.quadraticCurveTo(c.cx, c.cy, c.cutOutX, c.cutOutY);
+        ctx.lineTo(nextC.cutInX, nextC.cutInY);
+      }
+      ctx.closePath();
+      return;
+    }
+
+    const first = chain[0];
+    ctx.moveTo(
+      paddingHorizontal + (first.columnIndex + 0.5) * cellWidth,
+      paddingVertical + (first.rowIndex + 0.5) * cellHeight,
+    );
+
+    for (let i = 1; i < N - 1; i++) {
       const prev = chain[i - 1];
       const curr = chain[i];
       const next = chain[i + 1];
@@ -246,7 +325,7 @@ function renderElementMasks(
       }
     }
 
-    const last = chain[chain.length - 1];
+    const last = chain[N - 1];
     ctx.lineTo(
       paddingHorizontal + (last.columnIndex + 0.5) * cellWidth,
       paddingVertical + (last.rowIndex + 0.5) * cellHeight,
@@ -326,7 +405,9 @@ function renderElementMasks(
       }
       traceChainPath(gridCtx, chain);
       gridCtx.stroke();
-      drawCaps(gridCtx, chain, outerTubeStrokeWeight);
+      if (!isPathClosed(chain)) {
+        drawCaps(gridCtx, chain, outerTubeStrokeWeight);
+      }
     }
   }
 
@@ -359,7 +440,9 @@ function renderElementMasks(
       }
       traceChainPath(outerCtx, chain);
       outerCtx.stroke();
-      drawCaps(outerCtx, chain, outerTubeStrokeWeight);
+      if (!isPathClosed(chain)) {
+        drawCaps(outerCtx, chain, outerTubeStrokeWeight);
+      }
     }
 
     // Cutout Inner Cavity using destination-out
@@ -386,7 +469,9 @@ function renderElementMasks(
       }
       traceChainPath(outerCtx, chain);
       outerCtx.stroke();
-      drawCaps(outerCtx, chain, innerTubeStrokeWeight);
+      if (!isPathClosed(chain)) {
+        drawCaps(outerCtx, chain, innerTubeStrokeWeight);
+      }
     }
   }
 
@@ -413,7 +498,9 @@ function renderElementMasks(
       }
       traceChainPath(coreCtx, chain);
       coreCtx.stroke();
-      drawCaps(coreCtx, chain, params.coreLineWidth);
+      if (!isPathClosed(chain)) {
+        drawCaps(coreCtx, chain, params.coreLineWidth);
+      }
     }
   }
 

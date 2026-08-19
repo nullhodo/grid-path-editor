@@ -1,5 +1,6 @@
 import type p5 from "p5";
 import type { PathChain, SketchParameters } from "../../types/sketch";
+import { isPathClosed } from "../pathEditor";
 import { drawGridLines } from "./gridLines";
 import { getLayoutMetrics } from "./layoutHelper";
 import { drawIsolatedCellNode, drawPathEndCaps } from "./tubeCaps";
@@ -7,6 +8,7 @@ import { drawIsolatedCellNode, drawPathEndCaps } from "./tubeCaps";
 /**
  * Draws a single path chain as a polyline with optional corner rounding
  * using quadratic Bezier curves at each interior node.
+ * For closed loops, smooths all corners in the cycle seamlessly.
  */
 function drawChainLinePath(
   targetGraphics: p5 | p5.Graphics,
@@ -17,23 +19,108 @@ function drawChainLinePath(
   cellH: number,
   roundnessPercent: number,
 ): void {
-  if (chainNodes.length === 0) return;
+  const N = chainNodes.length;
+  if (N === 0) return;
 
   const roundnessFactor = roundnessPercent / 100.0;
   const maxCornerRadius = Math.min(cellW, cellH) * 0.45 * roundnessFactor;
+  const isClosed = isPathClosed(chainNodes);
 
-  if (chainNodes.length === 1 || maxCornerRadius <= 0.001) {
+  if (N === 1 || maxCornerRadius <= 0.001) {
     targetGraphics.beginShape();
-    for (let nodeIndex = 0; nodeIndex < chainNodes.length; nodeIndex++) {
+    for (let nodeIndex = 0; nodeIndex < N; nodeIndex++) {
       const node = chainNodes[nodeIndex];
       const centerPixelX = paddingX + (node.columnIndex + 0.5) * cellW;
       const centerPixelY = paddingY + (node.rowIndex + 0.5) * cellH;
       targetGraphics.vertex(centerPixelX, centerPixelY);
     }
-    targetGraphics.endShape();
+    if (isClosed) {
+      const closeMode =
+        (targetGraphics as unknown as { CLOSE?: p5.END_MODE }).CLOSE ||
+        ("close" as p5.END_MODE);
+      targetGraphics.endShape(closeMode);
+    } else {
+      targetGraphics.endShape();
+    }
     return;
   }
 
+  // --- CLOSED LOOP: Smooth every corner 0..N-1 ---
+  if (isClosed) {
+    targetGraphics.beginShape();
+
+    const cuts: {
+      cutInX: number;
+      cutInY: number;
+      cutOutX: number;
+      cutOutY: number;
+      cx: number;
+      cy: number;
+    }[] = [];
+
+    for (let i = 0; i < N; i++) {
+      const prev = chainNodes[(i - 1 + N) % N];
+      const curr = chainNodes[i];
+      const next = chainNodes[(i + 1) % N];
+
+      const px = paddingX + (prev.columnIndex + 0.5) * cellW;
+      const py = paddingY + (prev.rowIndex + 0.5) * cellH;
+      const cx = paddingX + (curr.columnIndex + 0.5) * cellW;
+      const cy = paddingY + (curr.rowIndex + 0.5) * cellH;
+      const nx = paddingX + (next.columnIndex + 0.5) * cellW;
+      const ny = paddingY + (next.rowIndex + 0.5) * cellH;
+
+      const vInX = cx - px;
+      const vInY = cy - py;
+      const dIn = Math.sqrt(vInX * vInX + vInY * vInY);
+
+      const vOutX = nx - cx;
+      const vOutY = ny - cy;
+      const dOut = Math.sqrt(vOutX * vOutX + vOutY * vOutY);
+
+      const cornerRadius = Math.min(
+        maxCornerRadius,
+        dIn * 0.45,
+        dOut * 0.45,
+      );
+
+      if (cornerRadius <= 0.001) {
+        cuts.push({
+          cutInX: cx,
+          cutInY: cy,
+          cutOutX: cx,
+          cutOutY: cy,
+          cx,
+          cy,
+        });
+      } else {
+        cuts.push({
+          cutInX: cx - (vInX / dIn) * cornerRadius,
+          cutInY: cy - (vInY / dIn) * cornerRadius,
+          cutOutX: cx + (vOutX / dOut) * cornerRadius,
+          cutOutY: cy + (vOutY / dOut) * cornerRadius,
+          cx,
+          cy,
+        });
+      }
+    }
+
+    targetGraphics.vertex(cuts[0].cutInX, cuts[0].cutInY);
+    for (let i = 0; i < N; i++) {
+      const c = cuts[i];
+      const nextC = cuts[(i + 1) % N];
+      targetGraphics.quadraticVertex(c.cx, c.cy, c.cutOutX, c.cutOutY);
+      targetGraphics.vertex(nextC.cutInX, nextC.cutInY);
+    }
+
+    const closeMode =
+      (targetGraphics as unknown as { CLOSE?: p5.END_MODE }).CLOSE ||
+      ("close" as p5.END_MODE);
+    targetGraphics.endShape(closeMode);
+    return;
+  }
+
+  // --- OPEN CHAIN ---
   targetGraphics.beginShape();
 
   const firstNode = chainNodes[0];
@@ -41,7 +128,7 @@ function drawChainLinePath(
   const startY = paddingY + (firstNode.rowIndex + 0.5) * cellH;
   targetGraphics.vertex(startX, startY);
 
-  for (let nodeIndex = 1; nodeIndex < chainNodes.length - 1; nodeIndex++) {
+  for (let nodeIndex = 1; nodeIndex < N - 1; nodeIndex++) {
     const previousNode = chainNodes[nodeIndex - 1];
     const currentNode = chainNodes[nodeIndex];
     const nextNode = chainNodes[nodeIndex + 1];
@@ -84,7 +171,7 @@ function drawChainLinePath(
     }
   }
 
-  const lastNode = chainNodes[chainNodes.length - 1];
+  const lastNode = chainNodes[N - 1];
   const endX = paddingX + (lastNode.columnIndex + 0.5) * cellW;
   const endY = paddingY + (lastNode.rowIndex + 0.5) * cellH;
   targetGraphics.vertex(endX, endY);
@@ -163,17 +250,20 @@ export function renderPathsGraphics(
       cellHeight,
       params.cornerRoundnessPercent,
     );
-    drawPathEndCaps(
-      targetGraphics,
-      currentChain,
-      paddingHorizontal,
-      paddingVertical,
-      cellWidth,
-      cellHeight,
-      outerTubeStrokeWeight,
-      params.outlineColor,
-      params.tipRoundnessPercent,
-    );
+
+    if (!isPathClosed(currentChain)) {
+      drawPathEndCaps(
+        targetGraphics,
+        currentChain,
+        paddingHorizontal,
+        paddingVertical,
+        cellWidth,
+        cellHeight,
+        outerTubeStrokeWeight,
+        params.outlineColor,
+        params.tipRoundnessPercent,
+      );
+    }
   }
 
   // Layer 2: Inner Cavity Cutout
@@ -213,17 +303,20 @@ export function renderPathsGraphics(
       cellHeight,
       params.cornerRoundnessPercent,
     );
-    drawPathEndCaps(
-      targetGraphics,
-      currentChain,
-      paddingHorizontal,
-      paddingVertical,
-      cellWidth,
-      cellHeight,
-      innerTubeStrokeWeight,
-      params.backgroundColor,
-      params.tipRoundnessPercent,
-    );
+
+    if (!isPathClosed(currentChain)) {
+      drawPathEndCaps(
+        targetGraphics,
+        currentChain,
+        paddingHorizontal,
+        paddingVertical,
+        cellWidth,
+        cellHeight,
+        innerTubeStrokeWeight,
+        params.backgroundColor,
+        params.tipRoundnessPercent,
+      );
+    }
   }
 
   // Layer 3: Core Central Axis Line
@@ -263,17 +356,20 @@ export function renderPathsGraphics(
       cellHeight,
       params.cornerRoundnessPercent,
     );
-    drawPathEndCaps(
-      targetGraphics,
-      currentChain,
-      paddingHorizontal,
-      paddingVertical,
-      cellWidth,
-      cellHeight,
-      params.coreLineWidth,
-      params.coreColor,
-      params.tipRoundnessPercent,
-    );
+
+    if (!isPathClosed(currentChain)) {
+      drawPathEndCaps(
+        targetGraphics,
+        currentChain,
+        paddingHorizontal,
+        paddingVertical,
+        cellWidth,
+        cellHeight,
+        params.coreLineWidth,
+        params.coreColor,
+        params.tipRoundnessPercent,
+      );
+    }
   }
 
   // Layer 4: Cell Center White Dots
