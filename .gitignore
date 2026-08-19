@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build Output
+dist/
+
+# Generated Output Assets
+output/
+
+# Agent Customizations & Skills
+.agent/
+.agents/
+
+# IDE / System
+.DS_Store
+Thumbs.db
+*.local
+.vscode/
+.idea/
