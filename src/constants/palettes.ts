@@ -116,8 +116,8 @@ export const PALETTES: Palette[] = [
 ];
 
 export const DEFAULT_SKETCH_PARAMETERS: SketchParameters = {
-  gridRows: 6,
-  gridColumns: 6,
+  gridRows: 8,
+  gridColumns: 8,
   gridPadding: 0.15,
   canvasAspectRatio: 1.0,
   paletteIndex: 0,
