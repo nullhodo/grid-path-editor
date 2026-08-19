@@ -58,6 +58,8 @@ export function useSketchHandlers(
 
   const paramsRef = useRef(params);
   const pathChainsRef = useRef(pathChains);
+  const historyStackRef = useRef(historyStack);
+  const historyPointerRef = useRef(historyPointer);
   const activeDrawingChainIndexRef = useRef<number | null>(null);
   const isDirtyStrokeRef = useRef(false);
 
@@ -69,23 +71,35 @@ export function useSketchHandlers(
     pathChainsRef.current = pathChains;
   }, [pathChains]);
 
+  useEffect(() => {
+    historyStackRef.current = historyStack;
+  }, [historyStack]);
+
+  useEffect(() => {
+    historyPointerRef.current = historyPointer;
+  }, [historyPointer]);
+
   const pushHistory = (
     newParams: SketchParameters,
     newPaths: PathChain[] = pathChainsRef.current,
   ) => {
-    setHistoryStack((prev) => {
-      const sliced = prev.slice(0, historyPointer + 1);
-      const updated = [
-        ...sliced,
-        {
-          params: JSON.parse(JSON.stringify(newParams)),
-          pathChains: JSON.parse(JSON.stringify(newPaths)),
-        },
-      ];
-      if (updated.length > 50) updated.shift();
-      return updated;
-    });
-    setHistoryPointer((prev) => Math.min(prev + 1, 49));
+    const currentPointer = historyPointerRef.current;
+    const currentStack = historyStackRef.current;
+    const sliced = currentStack.slice(0, currentPointer + 1);
+    const updated = [
+      ...sliced,
+      {
+        params: JSON.parse(JSON.stringify(newParams)),
+        pathChains: JSON.parse(JSON.stringify(newPaths)),
+      },
+    ];
+    if (updated.length > 50) updated.shift();
+    const nextPointer = updated.length - 1;
+
+    historyStackRef.current = updated;
+    historyPointerRef.current = nextPointer;
+    setHistoryStack(updated);
+    setHistoryPointer(nextPointer);
   };
 
   const handleParamChange = (
@@ -214,22 +228,30 @@ export function useSketchHandlers(
   };
 
   const handleUndo = () => {
-    if (historyPointer > 0) {
-      const prevPointer = historyPointer - 1;
-      const targetState = historyStack[prevPointer];
+    const currentPointer = historyPointerRef.current;
+    const currentStack = historyStackRef.current;
+    if (currentPointer > 0) {
+      const prevPointer = currentPointer - 1;
+      const targetState = currentStack[prevPointer];
+      historyPointerRef.current = prevPointer;
       setHistoryPointer(prevPointer);
       setParams(targetState.params);
+      paramsRef.current = targetState.params;
       setPathChains(targetState.pathChains);
       pathChainsRef.current = targetState.pathChains;
     }
   };
 
   const handleRedo = () => {
-    if (historyPointer < historyStack.length - 1) {
-      const nextPointer = historyPointer + 1;
-      const targetState = historyStack[nextPointer];
+    const currentPointer = historyPointerRef.current;
+    const currentStack = historyStackRef.current;
+    if (currentPointer < currentStack.length - 1) {
+      const nextPointer = currentPointer + 1;
+      const targetState = currentStack[nextPointer];
+      historyPointerRef.current = nextPointer;
       setHistoryPointer(nextPointer);
       setParams(targetState.params);
+      paramsRef.current = targetState.params;
       setPathChains(targetState.pathChains);
       pathChainsRef.current = targetState.pathChains;
     }

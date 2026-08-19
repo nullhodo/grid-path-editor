@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 interface Handlers {
   onUndo: () => void;
@@ -14,12 +14,12 @@ interface Handlers {
  * - Ctrl+Z: Undo
  * - Ctrl+Y / Ctrl+Shift+Z: Redo
  */
-export function useKeyboardShortcuts({
-  onUndo,
-  onRedo,
-  onClearPaths,
-  onTogglePanel,
-}: Handlers): void {
+export function useKeyboardShortcuts(handlers: Handlers): void {
+  const handlersRef = useRef(handlers);
+  useEffect(() => {
+    handlersRef.current = handlers;
+  }, [handlers]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore key events when typing inside input elements
@@ -40,30 +40,30 @@ export function useKeyboardShortcuts({
       if (key === "c") {
         if (!e.ctrlKey && !e.metaKey) {
           e.preventDefault();
-          onClearPaths?.();
+          handlersRef.current.onClearPaths?.();
         }
       } else if (key === "h") {
         if (!e.ctrlKey && !e.metaKey) {
           e.preventDefault();
-          onTogglePanel?.();
+          handlersRef.current.onTogglePanel?.();
         }
       } else if (e.ctrlKey || e.metaKey) {
         if (key === "z") {
           if (e.shiftKey) {
             e.preventDefault();
-            onRedo();
+            handlersRef.current.onRedo();
           } else {
             e.preventDefault();
-            onUndo();
+            handlersRef.current.onUndo();
           }
         } else if (key === "y") {
           e.preventDefault();
-          onRedo();
+          handlersRef.current.onRedo();
         }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onUndo, onRedo, onClearPaths, onTogglePanel]);
+  }, []);
 }
